@@ -4,10 +4,12 @@
 
 #include "ChordVisualizerView.h"
 #include "ChordVisualizerController.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cctype>
 
 namespace Steinberg {
 namespace Vst {
@@ -15,279 +17,962 @@ namespace Vst {
 static const char* kWndClassName = "ChordScopeWin32Editor";
 static bool g_classRegistered = false;
 
-static COLORREF rgb(BYTE r, BYTE g, BYTE b) { return RGB(r, g, b); }
+enum : UINT {
+    kThemeDark = 40001,
+    kThemeLight = 40002,
+};
+
+// -----------------------------------------------------------------------------
+// Constructor / Destructor
+// -----------------------------------------------------------------------------
 
 ChordVisualizerView::ChordVisualizerView(ChordVisualizerController* controller)
-    : CPluginView(nullptr), mController(controller) {
-    rect = ViewRect(0, 0, kBaseWidth, kBaseHeight);
+    : CPluginView(nullptr)
+    , mController(controller)
+{
+    rect = ViewRect(0, 0, kDesignWidth, kDesignHeight);
 }
 
-ChordVisualizerView::~ChordVisualizerView() {
-    if (mFontChord) DeleteObject(mFontChord);
-    if (mFontQuality) DeleteObject(mFontQuality);
-    if (mFontNotes) DeleteObject(mFontNotes);
-    if (mFontAnalysis) DeleteObject(mFontAnalysis);
+ChordVisualizerView::~ChordVisualizerView() = default;
+
+// -----------------------------------------------------------------------------
+// Platform
+// -----------------------------------------------------------------------------
+
+tresult PLUGIN_API ChordVisualizerView::isPlatformTypeSupported(FIDString type)
+{
+    return strcmp(type, kPlatformTypeHWND) == 0
+        ? kResultTrue
+        : kResultFalse;
 }
 
-tresult PLUGIN_API ChordVisualizerView::isPlatformTypeSupported(FIDString type) {
-    return strcmp(type, kPlatformTypeHWND) == 0 ? kResultTrue : kResultFalse;
-}
+// -----------------------------------------------------------------------------
+// Size
+// -----------------------------------------------------------------------------
 
-tresult PLUGIN_API ChordVisualizerView::getSize(ViewRect* size) {
-    if (!size) return kInvalidArgument;
+tresult PLUGIN_API ChordVisualizerView::getSize(ViewRect* size)
+{
+    if (!size)
+        return kInvalidArgument;
+
     *size = rect;
     return kResultOk;
 }
 
-tresult PLUGIN_API ChordVisualizerView::checkSizeConstraint(ViewRect* r) {
-    if (!r) return kInvalidArgument;
+tresult PLUGIN_API ChordVisualizerView::checkSizeConstraint(ViewRect* r)
+{
+    if (!r)
+        return kInvalidArgument;
 
-    // Keep the original 500x260 aspect ratio and snap to 1x / 2x / 3x.
-    const int requestedW = std::max(kBaseWidth, r->getWidth());
-    int scale = static_cast<int>(std::lround(static_cast<double>(requestedW) / kBaseWidth));
-    scale = std::clamp(scale, 1, kMaxScale);
+    // FREE RESIZE:
+    // No aspect-ratio locking.
+    // Only enforce minimum size.
 
-    const int w = kBaseWidth * scale;
-    const int h = kBaseHeight * scale;
-    *r = ViewRect(0, 0, w, h);
+    const LONG width = std::max<LONG>(
+        r->getWidth(),
+        kMinWidth
+    );
+
+    const LONG height = std::max<LONG>(
+        r->getHeight(),
+        kMinHeight
+    );
+
+    *r = ViewRect(0, 0, width, height);
+
     return kResultOk;
 }
 
-tresult PLUGIN_API ChordVisualizerView::onSize(ViewRect* newSize) {
-    if (!newSize) return kInvalidArgument;
+tresult PLUGIN_API ChordVisualizerView::onSize(ViewRect* newSize)
+{
+    if (!newSize)
+        return kInvalidArgument;
+
     rect = *newSize;
 
-    if (mHwnd) {
-        SetWindowPos(mHwnd, nullptr, 0, 0, rect.getWidth(), rect.getHeight(),
-                     SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
-        updateFonts(rect.getWidth(), rect.getHeight());
-        InvalidateRect(mHwnd, nullptr, FALSE);
+    if (mHwnd)
+    {
+        SetWindowPos(
+            mHwnd,
+            nullptr,
+            0,
+            0,
+            rect.getWidth(),
+            rect.getHeight(),
+            SWP_NOZORDER | SWP_NOMOVE
+        );
+
+        InvalidateRect(
+            mHwnd,
+            nullptr,
+            FALSE
+        );
     }
+
     return kResultOk;
 }
 
-float ChordVisualizerView::currentScale() const {
-    return std::clamp(static_cast<float>(rect.getWidth()) / static_cast<float>(kBaseWidth),
-                      1.0f, static_cast<float>(kMaxScale));
+// -----------------------------------------------------------------------------
+// Timer
+// -----------------------------------------------------------------------------
+
+void ChordVisualizerView::handleTimer()
+{
+    if (mHwnd)
+        InvalidateRect(mHwnd, nullptr, FALSE);
 }
 
-void ChordVisualizerView::updateFonts(int width, int height) {
-    (void)height;
-    const int s = std::max(1, static_cast<int>(std::lround(currentScale())));
+// -----------------------------------------------------------------------------
+// Theme menu
+// -----------------------------------------------------------------------------
 
-    if (mFontChord) DeleteObject(mFontChord);
-    if (mFontQuality) DeleteObject(mFontQuality);
-    if (mFontNotes) DeleteObject(mFontNotes);
-    if (mFontAnalysis) DeleteObject(mFontAnalysis);
+void ChordVisualizerView::showThemeMenu(int x, int y)
+{
+    if (!mHwnd)
+        return;
 
-    const int chordSize = 36 * s;
-    const int qualitySize = 17 * s;
-    const int notesSize = 13 * s;
-    const int analysisSize = 11 * s;
-
-    mFontChord = CreateFontA(-chordSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             CLEARTYPE_QUALITY, DEFAULT_PITCH, "Georgia");
-    mFontQuality = CreateFontA(-qualitySize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                               CLEARTYPE_QUALITY, DEFAULT_PITCH, "Georgia");
-    mFontNotes = CreateFontA(-notesSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             CLEARTYPE_QUALITY, DEFAULT_PITCH, "Georgia");
-    mFontAnalysis = CreateFontA(-analysisSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
-    (void)width;
-}
-
-void ChordVisualizerView::showThemeMenu(int x, int y) {
     HMENU menu = CreatePopupMenu();
-    if (!menu) return;
 
-    AppendMenuA(menu, MF_STRING | (mTheme == Theme::Dark ? MF_CHECKED : 0), 2001, "Dark");
-    AppendMenuA(menu, MF_STRING | (mTheme == Theme::Light ? MF_CHECKED : 0), 2002, "Light");
-    AppendMenuA(menu, MF_STRING | (mTheme == Theme::Transparent ? MF_CHECKED : 0), 2003, "Transparent");
+    if (!menu)
+        return;
+
+    const bool light =
+        g_sharedState.isLightTheme.load();
+
+    AppendMenuA(
+        menu,
+        MF_STRING | (!light ? MF_CHECKED : 0),
+        kThemeDark,
+        "Dark"
+    );
+
+    AppendMenuA(
+        menu,
+        MF_STRING | (light ? MF_CHECKED : 0),
+        kThemeLight,
+        "Light"
+    );
 
     POINT pt{x, y};
-    ClientToScreen(mHwnd, &pt);
-    const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, mHwnd, nullptr);
-    DestroyMenu(menu);
 
-    switch (command) {
-        case 2001: mTheme = Theme::Dark; break;
-        case 2002: mTheme = Theme::Light; break;
-        case 2003: mTheme = Theme::Transparent; break;
-        default: return;
+    ClientToScreen(
+        mHwnd,
+        &pt
+    );
+
+    SetForegroundWindow(mHwnd);
+
+    const UINT command =
+        TrackPopupMenu(
+            menu,
+            TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            pt.x,
+            pt.y,
+            0,
+            mHwnd,
+            nullptr
+        );
+
+    if (command == kThemeDark)
+    {
+        g_sharedState.isLightTheme.store(false);
+
+        InvalidateRect(
+            mHwnd,
+            nullptr,
+            FALSE
+        );
     }
-    InvalidateRect(mHwnd, nullptr, FALSE);
+    else if (command == kThemeLight)
+    {
+        g_sharedState.isLightTheme.store(true);
+
+        InvalidateRect(
+            mHwnd,
+            nullptr,
+            FALSE
+        );
+    }
+
+    DestroyMenu(menu);
 }
 
+// -----------------------------------------------------------------------------
+// Window procedure
+// -----------------------------------------------------------------------------
 
-void ChordVisualizerView::handleTimer() {
-    if (mHwnd) InvalidateRect(mHwnd, nullptr, FALSE);
-}
+LRESULT CALLBACK ChordVisualizerView::WndProc(
+    HWND hwnd,
+    UINT msg,
+    WPARAM wParam,
+    LPARAM lParam)
+{
+    auto* view =
+        reinterpret_cast<ChordVisualizerView*>(
+            GetWindowLongPtr(
+                hwnd,
+                GWLP_USERDATA
+            )
+        );
 
-LRESULT CALLBACK ChordVisualizerView::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    auto* view = reinterpret_cast<ChordVisualizerView*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+    switch (msg)
+    {
+        case WM_CREATE:
+        {
+            auto* cs =
+                reinterpret_cast<CREATESTRUCT*>(
+                    lParam
+                );
 
-    switch (msg) {
-        case WM_CREATE: {
-            auto* cs = reinterpret_cast<CREATESTRUCT*>(lParam);
-            view = reinterpret_cast<ChordVisualizerView*>(cs->lpCreateParams);
-            SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(view));
-            SetTimer(hwnd, kRefreshTimer, 50, nullptr);
+            view =
+                reinterpret_cast<ChordVisualizerView*>(
+                    cs->lpCreateParams
+                );
+
+            SetWindowLongPtr(
+                hwnd,
+                GWLP_USERDATA,
+                reinterpret_cast<LONG_PTR>(view)
+            );
+
+            SetTimer(
+                hwnd,
+                kRefreshTimer,
+                50,
+                nullptr
+            );
+
             return 0;
         }
+
         case WM_TIMER:
-            if (view && wParam == kRefreshTimer) view->handleTimer();
-            return 0;
-        case WM_RBUTTONUP:
-            if (view) view->showThemeMenu(static_cast<int>(static_cast<short>(LOWORD(lParam))),
-                                          static_cast<int>(static_cast<short>(HIWORD(lParam))));
-            return 0;
-        case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            if (view) view->render(hwnd, hdc);
-            EndPaint(hwnd, &ps);
+        {
+            if (view && wParam == kRefreshTimer)
+                view->handleTimer();
+
             return 0;
         }
+
+        case WM_RBUTTONUP:
+        {
+            if (view)
+            {
+                const int x =
+                    static_cast<int>(
+                        static_cast<short>(
+                            LOWORD(lParam)
+                        )
+                    );
+
+                const int y =
+                    static_cast<int>(
+                        static_cast<short>(
+                            HIWORD(lParam)
+                        )
+                    );
+
+                view->showThemeMenu(
+                    x,
+                    y
+                );
+            }
+
+            return 0;
+        }
+
+        case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+
+            HDC hdc =
+                BeginPaint(
+                    hwnd,
+                    &ps
+                );
+
+            if (view)
+                view->render(
+                    hwnd,
+                    hdc
+                );
+
+            EndPaint(
+                hwnd,
+                &ps
+            );
+
+            return 0;
+        }
+
         case WM_ERASEBKGND:
             return 1;
+
         case WM_DESTROY:
-            KillTimer(hwnd, kRefreshTimer);
+        {
+            KillTimer(
+                hwnd,
+                kRefreshTimer
+            );
+
             return 0;
+        }
+
         default:
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return DefWindowProc(
+                hwnd,
+                msg,
+                wParam,
+                lParam
+            );
     }
 }
 
-tresult PLUGIN_API ChordVisualizerView::attached(void* parent, FIDString type) {
-    if (strcmp(type, kPlatformTypeHWND) != 0) return kResultFalse;
+// -----------------------------------------------------------------------------
+// Attach
+// -----------------------------------------------------------------------------
 
-    mParentHwnd = static_cast<HWND>(parent);
-    HINSTANCE hInstance = GetModuleHandle(nullptr);
+tresult PLUGIN_API ChordVisualizerView::attached(
+    void* parent,
+    FIDString type)
+{
+    if (strcmp(type, kPlatformTypeHWND) != 0)
+        return kResultFalse;
 
-    if (!g_classRegistered) {
+    mParentHwnd =
+        static_cast<HWND>(parent);
+
+    HINSTANCE hInstance =
+        GetModuleHandle(nullptr);
+
+    if (!g_classRegistered)
+    {
         WNDCLASSA wc{};
-        wc.lpfnWndProc = WndProc;
-        wc.hInstance = hInstance;
-        wc.lpszClassName = kWndClassName;
-        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        wc.hbrBackground = nullptr;
-        if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return kResultFalse;
+
+        wc.lpfnWndProc =
+            WndProc;
+
+        wc.hInstance =
+            hInstance;
+
+        wc.lpszClassName =
+            kWndClassName;
+
+        wc.hCursor =
+            LoadCursor(
+                nullptr,
+                IDC_ARROW
+            );
+
+        wc.hbrBackground =
+            nullptr;
+
+        if (!RegisterClassA(
+                &wc) &&
+            GetLastError() !=
+                ERROR_CLASS_ALREADY_EXISTS)
+        {
+            return kResultFalse;
+        }
+
         g_classRegistered = true;
     }
 
-    mHwnd = CreateWindowExA(
-        WS_EX_TRANSPARENT, kWndClassName, "ChordScope",
-        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
-        0, 0, rect.getWidth(), rect.getHeight(),
-        mParentHwnd, nullptr, hInstance, this);
+    mHwnd =
+        CreateWindowExA(
+            0,
+            kWndClassName,
+            "ChordScope",
+            WS_CHILD |
+            WS_VISIBLE |
+            WS_CLIPCHILDREN,
+            0,
+            0,
+            kDesignWidth,
+            kDesignHeight,
+            mParentHwnd,
+            nullptr,
+            hInstance,
+            this
+        );
 
-    if (!mHwnd) return kResultFalse;
+    if (!mHwnd)
+        return kResultFalse;
 
-    updateFonts(rect.getWidth(), rect.getHeight());
     return kResultOk;
 }
 
-tresult PLUGIN_API ChordVisualizerView::removed() {
-    if (mHwnd) {
-        KillTimer(mHwnd, kRefreshTimer);
-        DestroyWindow(mHwnd);
+// -----------------------------------------------------------------------------
+// Remove
+// -----------------------------------------------------------------------------
+
+tresult PLUGIN_API ChordVisualizerView::removed()
+{
+    if (mHwnd)
+    {
+        KillTimer(
+            mHwnd,
+            kRefreshTimer
+        );
+
+        DestroyWindow(
+            mHwnd
+        );
+
         mHwnd = nullptr;
     }
+
     mParentHwnd = nullptr;
+
     return CPluginView::removed();
 }
 
-void ChordVisualizerView::render(HWND hwnd, HDC hdc) {
+// -----------------------------------------------------------------------------
+// Render
+// -----------------------------------------------------------------------------
+
+void ChordVisualizerView::render(
+    HWND hwnd,
+    HDC hdc)
+{
     RECT rc{};
-    GetClientRect(hwnd, &rc);
-    const int w = rc.right - rc.left;
-    const int h = rc.bottom - rc.top;
-    const float s = currentScale();
-    const int pad = std::max(18, static_cast<int>(20.0f * s));
 
-    HDC mem = CreateCompatibleDC(hdc);
-    HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
-    HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(mem, bmp));
+    GetClientRect(
+        hwnd,
+        &rc
+    );
 
-    const bool transparent = mTheme == Theme::Transparent;
-    if (!transparent) {
-        const COLORREF bg = (mTheme == Theme::Dark) ? rgb(24, 24, 27) : rgb(246, 244, 239);
-        HBRUSH brush = CreateSolidBrush(bg);
-        FillRect(mem, &rc, brush);
-        DeleteObject(brush);
-    } else {
-        // Transparent mode: copy the host parent's background behind the view,
-        // then draw only ChordScope's text over it. This avoids Unicode/alpha
-        // rendering tricks and behaves like a transparent overlay in hosts
-        // that paint their parent window normally.
-        if (mParentHwnd) {
-            POINT childPos{0, 0};
-            ClientToScreen(hwnd, &childPos);
-            ScreenToClient(mParentHwnd, &childPos);
-            HDC parentDc = GetDC(mParentHwnd);
-            if (parentDc) {
-                BitBlt(mem, 0, 0, w, h, parentDc, childPos.x, childPos.y, SRCCOPY);
-                ReleaseDC(mParentHwnd, parentDc);
-            }
+    const int width =
+        std::max<LONG>(
+            1,
+            rc.right
+        );
+
+    const int height =
+        std::max<LONG>(
+            1,
+            rc.bottom
+        );
+
+    // -------------------------------------------------------------------------
+    // Double buffering
+    // -------------------------------------------------------------------------
+
+    HDC mem =
+        CreateCompatibleDC(
+            hdc
+        );
+
+    if (!mem)
+        return;
+
+    HBITMAP bmp =
+        CreateCompatibleBitmap(
+            hdc,
+            width,
+            height
+        );
+
+    if (!bmp)
+    {
+        DeleteDC(mem);
+        return;
+    }
+
+    HBITMAP oldBmp =
+        static_cast<HBITMAP>(
+            SelectObject(
+                mem,
+                bmp
+            )
+        );
+
+    // -------------------------------------------------------------------------
+    // Theme
+    // -------------------------------------------------------------------------
+
+    const bool light =
+        g_sharedState.isLightTheme.load();
+
+    // Dark:
+    // Soft near-black.
+    //
+    // Light:
+    // Soft gray instead of harsh white.
+    const COLORREF bgColor =
+        light
+        ? RGB(224, 225, 228)
+        : RGB(18, 18, 18);
+
+    const COLORREF mainColor =
+        light
+        ? RGB(28, 29, 32)
+        : RGB(244, 244, 246);
+
+    const COLORREF subColor =
+        light
+        ? RGB(92, 94, 100)
+        : RGB(142, 142, 147);
+
+    HBRUSH bg =
+        CreateSolidBrush(
+            bgColor
+        );
+
+    FillRect(
+        mem,
+        &rc,
+        bg
+    );
+
+    DeleteObject(bg);
+
+    SetBkMode(
+        mem,
+        TRANSPARENT
+    );
+
+    // -------------------------------------------------------------------------
+    // Responsive layout
+    // -------------------------------------------------------------------------
+    //
+    // The design reference is 500 x 280.
+    //
+    // Unlike the previous implementation, this does NOT letterbox the design
+    // into a fixed aspect ratio.
+    //
+    // The text remains centered in the actual plugin window.
+    //
+
+    const double widthRatio =
+        static_cast<double>(width) /
+        static_cast<double>(kDesignWidth);
+
+    const double heightRatio =
+        static_cast<double>(height) /
+        static_cast<double>(kDesignHeight);
+
+    // Typography responds mainly to the smaller dimension so that an extremely
+    // wide but short window does not create enormous text.
+    const double scale =
+        std::clamp(
+            std::min(
+                widthRatio,
+                heightRatio
+            ),
+            0.70,
+            2.50
+        );
+
+    // -------------------------------------------------------------------------
+    // Current chord information
+    // -------------------------------------------------------------------------
+
+    const bool active =
+        g_sharedState.activeNotesCount.load() > 0;
+
+    const char* chord =
+        active &&
+        g_sharedState.chordName[0]
+        ? g_sharedState.chordName
+        : "-";
+
+    const char* quality =
+        active &&
+        g_sharedState.chordQuality[0]
+        ? g_sharedState.chordQuality
+        : "";
+
+    const char* notes =
+        active &&
+        g_sharedState.notesString[0]
+        ? g_sharedState.notesString
+        : "";
+
+    const char* root =
+        active &&
+        g_sharedState.rootNote[0]
+        ? g_sharedState.rootNote
+        : "";
+
+    const char* bass =
+        active &&
+        g_sharedState.bassNote[0]
+        ? g_sharedState.bassNote
+        : "";
+
+    const char* inversion =
+        active &&
+        g_sharedState.inversionString[0]
+        ? g_sharedState.inversionString
+        : "";
+
+    const char* formula =
+        active &&
+        g_sharedState.intervalsString[0]
+        ? g_sharedState.intervalsString
+        : "";
+
+    // -------------------------------------------------------------------------
+    // Font helper
+    // -------------------------------------------------------------------------
+
+    auto fontSize =
+        [&](double baseSize) -> int
+    {
+        return std::max(
+            8,
+            static_cast<int>(
+                std::lround(
+                    baseSize * scale
+                )
+            )
+        );
+    };
+
+    auto makeFont =
+        [&](double size,
+            int weight,
+            const char* family) -> HFONT
+    {
+        return CreateFontA(
+            -fontSize(size),
+            0,
+            0,
+            0,
+            weight,
+            FALSE,
+            FALSE,
+            FALSE,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE,
+            family
+        );
+    };
+
+    // -------------------------------------------------------------------------
+    // Typography
+    // -------------------------------------------------------------------------
+    //
+    // Main chord:
+    //   large, bold, clean
+    //
+    // Quality:
+    //   small uppercase
+    //
+    // Notes:
+    //   medium, light
+    //
+    // Analysis:
+    //   small muted text
+    //
+
+    HFONT fontChord =
+        makeFont(
+            58.0,
+            FW_BOLD,
+            "Segoe UI"
+        );
+
+    HFONT fontQuality =
+        makeFont(
+            11.0,
+            FW_SEMIBOLD,
+            "Segoe UI"
+        );
+
+    HFONT fontNotes =
+        makeFont(
+            17.0,
+            FW_NORMAL,
+            "Segoe UI"
+        );
+
+    HFONT fontMeta =
+        makeFont(
+            11.0,
+            FW_NORMAL,
+            "Segoe UI"
+        );
+
+    HFONT fontFormula =
+        makeFont(
+            11.0,
+            FW_NORMAL,
+            "Segoe UI"
+        );
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    auto centerRect =
+        [&](double top,
+            double bottom) -> RECT
+    {
+        const int margin =
+            std::max(
+                20,
+                static_cast<int>(
+                    std::lround(
+                        30.0 * scale
+                    )
+                )
+            );
+
+        RECT r{};
+
+        r.left =
+            margin;
+
+        r.right =
+            width - margin;
+
+        r.top =
+            static_cast<int>(
+                std::lround(
+                    top * height / kDesignHeight
+                )
+            );
+
+        r.bottom =
+            static_cast<int>(
+                std::lround(
+                    bottom * height / kDesignHeight
+                )
+            );
+
+        return r;
+    };
+
+    auto drawCentered =
+        [&](HFONT font,
+            COLORREF color,
+            const char* text,
+            double top,
+            double bottom,
+            int characterExtra = 0)
+    {
+        if (!text || !text[0])
+            return;
+
+        SelectObject(
+            mem,
+            font
+        );
+
+        SetTextColor(
+            mem,
+            color
+        );
+
+        SetTextCharacterExtra(
+            mem,
+            static_cast<int>(
+                std::lround(
+                    characterExtra * scale
+                )
+            )
+        );
+
+        RECT r =
+            centerRect(
+                top,
+                bottom
+            );
+
+        DrawTextA(
+            mem,
+            text,
+            -1,
+            &r,
+            DT_CENTER |
+            DT_VCENTER |
+            DT_SINGLELINE |
+            DT_NOPREFIX
+        );
+
+        SetTextCharacterExtra(
+            mem,
+            0
+        );
+    };
+
+    // -------------------------------------------------------------------------
+    // Prepare quality text
+    // -------------------------------------------------------------------------
+
+    char qualityUpper[128]{};
+
+    if (quality[0])
+    {
+        std::strncpy(
+            qualityUpper,
+            quality,
+            sizeof(qualityUpper) - 1
+        );
+
+        for (char* p = qualityUpper;
+             *p;
+             ++p)
+        {
+            *p =
+                static_cast<char>(
+                    std::toupper(
+                        static_cast<unsigned char>(
+                            *p
+                        )
+                    )
+                );
         }
     }
 
-    const COLORREF primary = transparent
-        ? rgb(245, 245, 245)
-        : (mTheme == Theme::Dark ? rgb(245, 245, 247) : rgb(35, 34, 32));
-    const COLORREF secondary = transparent
-        ? rgb(215, 215, 220)
-        : (mTheme == Theme::Dark ? rgb(165, 165, 175) : rgb(92, 88, 82));
-    const COLORREF body = transparent
-        ? rgb(232, 232, 235)
-        : (mTheme == Theme::Dark ? rgb(215, 215, 220) : rgb(60, 57, 53));
+    // -------------------------------------------------------------------------
+    // Prepare notes
+    // -------------------------------------------------------------------------
 
-    SetBkMode(mem, TRANSPARENT);
-    SetTextColor(mem, primary);
+    char notesClean[128]{};
 
-    const bool active = g_sharedState.activeNotesCount.load() > 0;
-    const char* chord = g_sharedState.chordName[0] ? g_sharedState.chordName : "-";
-    const char* quality = active && g_sharedState.chordQuality[0] ? g_sharedState.chordQuality : "";
-    const char* notes = active && g_sharedState.notesString[0] ? g_sharedState.notesString : "";
+    if (notes[0])
+    {
+        std::strncpy(
+            notesClean,
+            notes,
+            sizeof(notesClean) - 1
+        );
 
-    // Book-like hierarchy: title, subtitle, body, then compact analysis.
-    RECT chordRect{pad, static_cast<int>(32 * s), w - pad, static_cast<int>(82 * s)};
-    SelectObject(mem, mFontChord);
-    SetTextColor(mem, primary);
-    DrawTextA(mem, chord, -1, &chordRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-    RECT qualityRect{pad, static_cast<int>(88 * s), w - pad, static_cast<int>(116 * s)};
-    SelectObject(mem, mFontQuality);
-    SetTextColor(mem, secondary);
-    DrawTextA(mem, quality, -1, &qualityRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-    RECT notesRect{pad, static_cast<int>(132 * s), w - pad, static_cast<int>(158 * s)};
-    SelectObject(mem, mFontNotes);
-    SetTextColor(mem, body);
-    DrawTextA(mem, notes, -1, &notesRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-    char info[256]{};
-    if (active) {
-        std::snprintf(info, sizeof(info), "Root %s    Bass %s    %s    %s",
-                      g_sharedState.rootNote[0] ? g_sharedState.rootNote : "-",
-                      g_sharedState.bassNote[0] ? g_sharedState.bassNote : "-",
-                      g_sharedState.inversionString[0] ? g_sharedState.inversionString : "-",
-                      g_sharedState.intervalsString[0] ? g_sharedState.intervalsString : "-");
+        // Replace hyphen separators with centered dot.
+        //
+        // This is intentionally conservative:
+        // if the source already contains "·", it is preserved.
+        //
+        for (char* p = notesClean;
+             *p;
+             ++p)
+        {
+            if (*p == '-')
+                *p = ' ';
+        }
     }
 
-    RECT infoRect{pad, static_cast<int>(184 * s), w - pad, static_cast<int>(212 * s)};
-    SelectObject(mem, mFontAnalysis);
-    SetTextColor(mem, secondary);
-    DrawTextA(mem, info, -1, &infoRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    // -------------------------------------------------------------------------
+    // Prepare analysis line
+    // -------------------------------------------------------------------------
 
+    char meta[256]{};
 
+    if (active)
+    {
+        if (inversion[0])
+        {
+            std::snprintf(
+                meta,
+                sizeof(meta),
+                "Root %s  ·  Bass %s  ·  %s",
+                root,
+                bass,
+                inversion
+            );
+        }
+        else
+        {
+            std::snprintf(
+                meta,
+                sizeof(meta),
+                "Root %s  ·  Bass %s",
+                root,
+                bass
+            );
+        }
+    }
 
-    BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
-    SelectObject(mem, oldBmp);
+    // -------------------------------------------------------------------------
+    // Layout
+    // -------------------------------------------------------------------------
+    //
+    // The vertical positions are based on the 500 x 280 design.
+    //
+    // We deliberately keep the groups closer together than the old version.
+    //
+
+    // 1. Main chord
+    drawCentered(
+        fontChord,
+        mainColor,
+        chord,
+        30,
+        98
+    );
+
+    // 2. Chord quality
+    drawCentered(
+        fontQuality,
+        subColor,
+        qualityUpper,
+        102,
+        128,
+        2
+    );
+
+    // 3. Notes
+    drawCentered(
+        fontNotes,
+        mainColor,
+        notesClean,
+        139,
+        177,
+        1
+    );
+
+    // 4. Root / Bass / Position
+    drawCentered(
+        fontMeta,
+        subColor,
+        meta,
+        205,
+        230,
+        0
+    );
+
+    // 5. Formula
+    drawCentered(
+        fontFormula,
+        subColor,
+        formula,
+        232,
+        258,
+        1
+    );
+
+    // -------------------------------------------------------------------------
+    // Cleanup
+    // -------------------------------------------------------------------------
+
+    DeleteObject(fontChord);
+    DeleteObject(fontQuality);
+    DeleteObject(fontNotes);
+    DeleteObject(fontMeta);
+    DeleteObject(fontFormula);
+
+    BitBlt(
+        hdc,
+        0,
+        0,
+        width,
+        height,
+        mem,
+        0,
+        0,
+        SRCCOPY
+    );
+
+    SelectObject(
+        mem,
+        oldBmp
+    );
+
     DeleteObject(bmp);
     DeleteDC(mem);
 }
