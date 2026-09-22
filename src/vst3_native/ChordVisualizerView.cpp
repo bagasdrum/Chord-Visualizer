@@ -1,3 +1,7 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "ChordVisualizerView.h"
 #include "ChordVisualizerController.h"
 #include <algorithm>
