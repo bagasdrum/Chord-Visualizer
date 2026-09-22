@@ -6,7 +6,6 @@
 
 #include "public.sdk/source/common/pluginview.h"
 #include "ChordVisualizerShared.h"
-
 #include <windows.h>
 
 namespace Steinberg {
@@ -26,7 +25,7 @@ public:
     tresult PLUGIN_API getSize(ViewRect* size) override;
     tresult PLUGIN_API onSize(ViewRect* newSize) override;
     tresult PLUGIN_API canResize() override { return kResultTrue; }
-    tresult PLUGIN_API checkSizeConstraint(ViewRect* size) override;
+    tresult PLUGIN_API checkSizeConstraint(ViewRect* rect) override;
 
     static LRESULT CALLBACK WndProc(
         HWND hwnd,
@@ -36,41 +35,25 @@ public:
     );
 
 private:
-    enum class Theme {
-        Dark,
-        Light
-    };
-
     void render(HWND hwnd, HDC hdc);
     void handleTimer();
-    void showThemeMenu(HWND hwnd, int x, int y);
-
-    void updateFonts(int width, int height);
-    void destroyFonts();
+    void showThemeMenu(int x, int y);
 
     HWND mHwnd{nullptr};
     HWND mParentHwnd{nullptr};
 
     ChordVisualizerController* mController{nullptr};
 
-    HFONT mFontChord{nullptr};
-    HFONT mFontQuality{nullptr};
-    HFONT mFontNotes{nullptr};
-    HFONT mFontInfo{nullptr};
-    HFONT mFontFormula{nullptr};
-
-    Theme mTheme{Theme::Dark};
-
     static constexpr UINT kRefreshTimer = 1001;
 
-    static constexpr int kBaseWidth = 500;
-    static constexpr int kBaseHeight = 280;
+    // Base design size
+    static constexpr LONG kDesignWidth = 500;
+    static constexpr LONG kDesignHeight = 280;
 
+    // Minimum window size.
+    // Width and height are independent.
     static constexpr LONG kMinWidth = 320;
     static constexpr LONG kMinHeight = 180;
-
-    static constexpr UINT kThemeDark = 2001;
-    static constexpr UINT kThemeLight = 2002;
 };
 
 } // namespace Vst
