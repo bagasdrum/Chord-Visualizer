@@ -17,7 +17,8 @@ namespace Vst {
 static const char* kWndClassName = "ChordScopeWin32Editor";
 static bool g_classRegistered = false;
 
-enum : UINT {
+enum : UINT
+{
     kThemeDark = 40001,
     kThemeLight = 40002,
 };
@@ -26,11 +27,17 @@ enum : UINT {
 // Constructor / Destructor
 // -----------------------------------------------------------------------------
 
-ChordVisualizerView::ChordVisualizerView(ChordVisualizerController* controller)
+ChordVisualizerView::ChordVisualizerView(
+    ChordVisualizerController* controller)
     : CPluginView(nullptr)
     , mController(controller)
 {
-    rect = ViewRect(0, 0, kDesignWidth, kDesignHeight);
+    rect = ViewRect(
+        0,
+        0,
+        kDesignWidth,
+        kDesignHeight
+    );
 }
 
 ChordVisualizerView::~ChordVisualizerView() = default;
@@ -39,7 +46,8 @@ ChordVisualizerView::~ChordVisualizerView() = default;
 // Platform
 // -----------------------------------------------------------------------------
 
-tresult PLUGIN_API ChordVisualizerView::isPlatformTypeSupported(FIDString type)
+tresult PLUGIN_API
+ChordVisualizerView::isPlatformTypeSupported(FIDString type)
 {
     return strcmp(type, kPlatformTypeHWND) == 0
         ? kResultTrue
@@ -50,40 +58,47 @@ tresult PLUGIN_API ChordVisualizerView::isPlatformTypeSupported(FIDString type)
 // Size
 // -----------------------------------------------------------------------------
 
-tresult PLUGIN_API ChordVisualizerView::getSize(ViewRect* size)
+tresult PLUGIN_API
+ChordVisualizerView::getSize(ViewRect* size)
 {
     if (!size)
         return kInvalidArgument;
 
     *size = rect;
+
     return kResultOk;
 }
 
-tresult PLUGIN_API ChordVisualizerView::checkSizeConstraint(ViewRect* r)
+tresult PLUGIN_API
+ChordVisualizerView::checkSizeConstraint(ViewRect* r)
 {
     if (!r)
         return kInvalidArgument;
 
-    // FREE RESIZE:
-    // No aspect-ratio locking.
-    // Only enforce minimum size.
+    const LONG width =
+        std::max<LONG>(
+            r->getWidth(),
+            kMinWidth
+        );
 
-    const LONG width = std::max<LONG>(
-        r->getWidth(),
-        kMinWidth
+    const LONG height =
+        std::max<LONG>(
+            r->getHeight(),
+            kMinHeight
+        );
+
+    *r = ViewRect(
+        0,
+        0,
+        width,
+        height
     );
-
-    const LONG height = std::max<LONG>(
-        r->getHeight(),
-        kMinHeight
-    );
-
-    *r = ViewRect(0, 0, width, height);
 
     return kResultOk;
 }
 
-tresult PLUGIN_API ChordVisualizerView::onSize(ViewRect* newSize)
+tresult PLUGIN_API
+ChordVisualizerView::onSize(ViewRect* newSize)
 {
     if (!newSize)
         return kInvalidArgument;
@@ -119,7 +134,11 @@ tresult PLUGIN_API ChordVisualizerView::onSize(ViewRect* newSize)
 void ChordVisualizerView::handleTimer()
 {
     if (mHwnd)
-        InvalidateRect(mHwnd, nullptr, FALSE);
+        InvalidateRect(
+            mHwnd,
+            nullptr,
+            FALSE
+        );
 }
 
 // -----------------------------------------------------------------------------
@@ -141,19 +160,23 @@ void ChordVisualizerView::showThemeMenu(int x, int y)
 
     AppendMenuA(
         menu,
-        MF_STRING | (!light ? MF_CHECKED : 0),
+        MF_STRING |
+        (!light ? MF_CHECKED : 0),
         kThemeDark,
         "Dark"
     );
 
     AppendMenuA(
         menu,
-        MF_STRING | (light ? MF_CHECKED : 0),
+        MF_STRING |
+        (light ? MF_CHECKED : 0),
         kThemeLight,
         "Light"
     );
 
-    POINT pt{x, y};
+    POINT pt{};
+    pt.x = x;
+    pt.y = y;
 
     ClientToScreen(
         mHwnd,
@@ -162,10 +185,11 @@ void ChordVisualizerView::showThemeMenu(int x, int y)
 
     SetForegroundWindow(mHwnd);
 
-    const UINT command =
+    UINT command =
         TrackPopupMenu(
             menu,
-            TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            TPM_RIGHTBUTTON |
+            TPM_RETURNCMD,
             pt.x,
             pt.y,
             0,
@@ -201,7 +225,8 @@ void ChordVisualizerView::showThemeMenu(int x, int y)
 // Window procedure
 // -----------------------------------------------------------------------------
 
-LRESULT CALLBACK ChordVisualizerView::WndProc(
+LRESULT CALLBACK
+ChordVisualizerView::WndProc(
     HWND hwnd,
     UINT msg,
     WPARAM wParam,
@@ -247,8 +272,11 @@ LRESULT CALLBACK ChordVisualizerView::WndProc(
 
         case WM_TIMER:
         {
-            if (view && wParam == kRefreshTimer)
+            if (view &&
+                wParam == kRefreshTimer)
+            {
                 view->handleTimer();
+            }
 
             return 0;
         }
@@ -282,7 +310,7 @@ LRESULT CALLBACK ChordVisualizerView::WndProc(
 
         case WM_PAINT:
         {
-            PAINTSTRUCT ps;
+            PAINTSTRUCT ps{};
 
             HDC hdc =
                 BeginPaint(
@@ -291,10 +319,12 @@ LRESULT CALLBACK ChordVisualizerView::WndProc(
                 );
 
             if (view)
+            {
                 view->render(
                     hwnd,
                     hdc
                 );
+            }
 
             EndPaint(
                 hwnd,
@@ -331,7 +361,8 @@ LRESULT CALLBACK ChordVisualizerView::WndProc(
 // Attach
 // -----------------------------------------------------------------------------
 
-tresult PLUGIN_API ChordVisualizerView::attached(
+tresult PLUGIN_API
+ChordVisualizerView::attached(
     void* parent,
     FIDString type)
 {
@@ -366,8 +397,7 @@ tresult PLUGIN_API ChordVisualizerView::attached(
         wc.hbrBackground =
             nullptr;
 
-        if (!RegisterClassA(
-                &wc) &&
+        if (!RegisterClassA(&wc) &&
             GetLastError() !=
                 ERROR_CLASS_ALREADY_EXISTS)
         {
@@ -405,7 +435,8 @@ tresult PLUGIN_API ChordVisualizerView::attached(
 // Remove
 // -----------------------------------------------------------------------------
 
-tresult PLUGIN_API ChordVisualizerView::removed()
+tresult PLUGIN_API
+ChordVisualizerView::removed()
 {
     if (mHwnd)
     {
@@ -458,9 +489,7 @@ void ChordVisualizerView::render(
     // -------------------------------------------------------------------------
 
     HDC mem =
-        CreateCompatibleDC(
-            hdc
-        );
+        CreateCompatibleDC(hdc);
 
     if (!mem)
         return;
@@ -493,11 +522,6 @@ void ChordVisualizerView::render(
     const bool light =
         g_sharedState.isLightTheme.load();
 
-    // Dark:
-    // Soft near-black.
-    //
-    // Light:
-    // Soft gray instead of harsh white.
     const COLORREF bgColor =
         light
         ? RGB(224, 225, 228)
@@ -532,16 +556,8 @@ void ChordVisualizerView::render(
     );
 
     // -------------------------------------------------------------------------
-    // Responsive layout
+    // Responsive scale
     // -------------------------------------------------------------------------
-    //
-    // The design reference is 500 x 280.
-    //
-    // Unlike the previous implementation, this does NOT letterbox the design
-    // into a fixed aspect ratio.
-    //
-    // The text remains centered in the actual plugin window.
-    //
 
     const double widthRatio =
         static_cast<double>(width) /
@@ -551,8 +567,6 @@ void ChordVisualizerView::render(
         static_cast<double>(height) /
         static_cast<double>(kDesignHeight);
 
-    // Typography responds mainly to the smaller dimension so that an extremely
-    // wide but short window does not create enormous text.
     const double scale =
         std::clamp(
             std::min(
@@ -560,7 +574,7 @@ void ChordVisualizerView::render(
                 heightRatio
             ),
             0.70,
-            2.50
+            2.00
         );
 
     // -------------------------------------------------------------------------
@@ -613,17 +627,17 @@ void ChordVisualizerView::render(
         : "";
 
     // -------------------------------------------------------------------------
-    // Font helper
+    // Font helpers
     // -------------------------------------------------------------------------
 
     auto fontSize =
-        [&](double baseSize) -> int
+        [&](double base) -> int
     {
         return std::max(
             8,
             static_cast<int>(
                 std::lround(
-                    baseSize * scale
+                    base * scale
                 )
             )
         );
@@ -631,8 +645,7 @@ void ChordVisualizerView::render(
 
     auto makeFont =
         [&](double size,
-            int weight,
-            const char* family) -> HFONT
+            int weight) -> HFONT
     {
         return CreateFontA(
             -fontSize(size),
@@ -648,99 +661,85 @@ void ChordVisualizerView::render(
             CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,
             DEFAULT_PITCH | FF_DONTCARE,
-            family
+            "Segoe UI"
         );
     };
-
-    // -------------------------------------------------------------------------
-    // Typography
-    // -------------------------------------------------------------------------
-    //
-    // Main chord:
-    //   large, bold, clean
-    //
-    // Quality:
-    //   small uppercase
-    //
-    // Notes:
-    //   medium, light
-    //
-    // Analysis:
-    //   small muted text
-    //
 
     HFONT fontChord =
         makeFont(
             58.0,
-            FW_BOLD,
-            "Segoe UI"
+            FW_BOLD
         );
 
     HFONT fontQuality =
         makeFont(
             11.0,
-            FW_SEMIBOLD,
-            "Segoe UI"
+            FW_SEMIBOLD
         );
 
     HFONT fontNotes =
         makeFont(
             17.0,
-            FW_NORMAL,
-            "Segoe UI"
+            FW_NORMAL
         );
 
     HFONT fontMeta =
         makeFont(
-            11.0,
-            FW_NORMAL,
-            "Segoe UI"
+            10.0,
+            FW_NORMAL
         );
 
     HFONT fontFormula =
         makeFont(
             11.0,
-            FW_NORMAL,
-            "Segoe UI"
+            FW_NORMAL
         );
 
     // -------------------------------------------------------------------------
-    // Helpers
+    // Text area
     // -------------------------------------------------------------------------
 
-    auto centerRect =
+    const int sideMargin =
+        std::max(
+            24,
+            static_cast<int>(
+                std::lround(
+                    30.0 * scale
+                )
+            )
+        );
+
+    auto makeRect =
         [&](double top,
             double bottom) -> RECT
     {
-        const int margin =
-            std::max(
-                20,
-                static_cast<int>(
-                    std::lround(
-                        30.0 * scale
-                    )
-                )
-            );
-
         RECT r{};
 
         r.left =
-            margin;
+            sideMargin;
 
         r.right =
-            width - margin;
+            width - sideMargin;
 
         r.top =
             static_cast<int>(
                 std::lround(
-                    top * height / kDesignHeight
+                    top *
+                    height /
+                    static_cast<double>(
+                        kDesignHeight
+                    )
                 )
             );
 
         r.bottom =
             static_cast<int>(
                 std::lround(
-                    bottom * height / kDesignHeight
+                    bottom *
+                    height /
+                    static_cast<double>(
+                        kDesignHeight
+                    )
                 )
             );
 
@@ -753,7 +752,7 @@ void ChordVisualizerView::render(
             const char* text,
             double top,
             double bottom,
-            int characterExtra = 0)
+            int characterExtra)
     {
         if (!text || !text[0])
             return;
@@ -778,7 +777,7 @@ void ChordVisualizerView::render(
         );
 
         RECT r =
-            centerRect(
+            makeRect(
                 top,
                 bottom
             );
@@ -801,7 +800,7 @@ void ChordVisualizerView::render(
     };
 
     // -------------------------------------------------------------------------
-    // Prepare quality text
+    // Prepare quality
     // -------------------------------------------------------------------------
 
     char qualityUpper[128]{};
@@ -831,6 +830,11 @@ void ChordVisualizerView::render(
 
     // -------------------------------------------------------------------------
     // Prepare notes
+    //
+    // IMPORTANT:
+    // ASCII only. No Unicode bullet / flat / sharp characters.
+    //
+    // Existing separators are normalized to " . ".
     // -------------------------------------------------------------------------
 
     char notesClean[128]{};
@@ -843,22 +847,50 @@ void ChordVisualizerView::render(
             sizeof(notesClean) - 1
         );
 
-        // Replace hyphen separators with centered dot.
-        //
-        // This is intentionally conservative:
-        // if the source already contains "·", it is preserved.
-        //
-        for (char* p = notesClean;
-             *p;
-             ++p)
+        char temp[128]{};
+        int out = 0;
+
+        for (int i = 0;
+             notesClean[i] &&
+             out < static_cast<int>(
+                 sizeof(temp) - 1
+             );
+             ++i)
         {
-            if (*p == '-')
-                *p = ' ';
+            const char c =
+                notesClean[i];
+
+            if (c == '-')
+            {
+                temp[out++] = ' ';
+                temp[out++] = '.';
+                temp[out++] = ' ';
+            }
+            else
+            {
+                temp[out++] = c;
+            }
+
+            if (out >=
+                static_cast<int>(
+                    sizeof(temp) - 1
+                ))
+            {
+                break;
+            }
         }
+
+        temp[out] = '\0';
+
+        std::strncpy(
+            notesClean,
+            temp,
+            sizeof(notesClean) - 1
+        );
     }
 
     // -------------------------------------------------------------------------
-    // Prepare analysis line
+    // Prepare metadata
     // -------------------------------------------------------------------------
 
     char meta[256]{};
@@ -870,7 +902,7 @@ void ChordVisualizerView::render(
             std::snprintf(
                 meta,
                 sizeof(meta),
-                "Root %s  ·  Bass %s  ·  %s",
+                "Root %s    Bass %s    %s",
                 root,
                 bass,
                 inversion
@@ -881,7 +913,7 @@ void ChordVisualizerView::render(
             std::snprintf(
                 meta,
                 sizeof(meta),
-                "Root %s  ·  Bass %s",
+                "Root %s    Bass %s",
                 root,
                 bass
             );
@@ -889,60 +921,125 @@ void ChordVisualizerView::render(
     }
 
     // -------------------------------------------------------------------------
-    // Layout
+    // Prepare formula
+    //
+    // ASCII-safe:
+    //   1 - b3 - 5
+    // becomes:
+    //   1 . b3 . 5
     // -------------------------------------------------------------------------
-    //
-    // The vertical positions are based on the 500 x 280 design.
-    //
-    // We deliberately keep the groups closer together than the old version.
-    //
 
-    // 1. Main chord
+    char formulaClean[128]{};
+
+    if (formula[0])
+    {
+        int out = 0;
+
+        for (int i = 0;
+             formula[i] &&
+             out < static_cast<int>(
+                 sizeof(formulaClean) - 1
+             );
+             ++i)
+        {
+            const char c =
+                formula[i];
+
+            if (c == '-')
+            {
+                // Avoid duplicate spaces around separator.
+                while (out > 0 &&
+                       formulaClean[out - 1] == ' ')
+                {
+                    --out;
+                }
+
+                if (out > 0)
+                    formulaClean[out++] = ' ';
+
+                formulaClean[out++] = '.';
+                formulaClean[out++] = ' ';
+            }
+            else
+            {
+                formulaClean[out++] = c;
+            }
+        }
+
+        while (out > 0 &&
+               formulaClean[out - 1] == ' ')
+        {
+            --out;
+        }
+
+        formulaClean[out] = '\0';
+    }
+
+    // -------------------------------------------------------------------------
+    // Layout
+    //
+    // 500 x 280 reference:
+    //
+    //             Am
+    //
+    //         MINOR TRIAD
+    //
+    //         A3 . C4 . E4
+    //
+    //      Root A    Bass A
+    //       Root Position
+    //
+    //          1 . b3 . 5
+    //
+    // -------------------------------------------------------------------------
+
+    // Main chord
     drawCentered(
         fontChord,
         mainColor,
         chord,
-        30,
-        98
+        31,
+        87,
+        0
     );
 
-    // 2. Chord quality
+    // Quality
     drawCentered(
         fontQuality,
         subColor,
         qualityUpper,
-        102,
-        128,
+        91,
+        114,
         2
     );
 
-    // 3. Notes
+    // Notes
     drawCentered(
         fontNotes,
         mainColor,
         notesClean,
-        139,
-        177,
-        1
+        120,
+        148,
+        0
     );
 
-    // 4. Root / Bass / Position
+    // Analysis
     drawCentered(
         fontMeta,
         subColor,
         meta,
-        205,
-        230,
+        169,
+        190,
         0
     );
 
-    // 5. Formula
+    // Formula
     drawCentered(
         fontFormula,
         subColor,
-        formula,
-        232,
-        258,
+        formulaClean,
+        197,
+        220,
         1
     );
 
