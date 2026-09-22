@@ -66,8 +66,8 @@ private:
     static constexpr int kBaseWidth = 500;
     static constexpr int kBaseHeight = 280;
 
-    static constexpr int kMinWidth = 350;
-    static constexpr int kMinHeight = 220;
+    static constexpr LONG kMinWidth = 320;
+    static constexpr LONG kMinHeight = 180;
 
     static constexpr UINT kThemeDark = 2001;
     static constexpr UINT kThemeLight = 2002;
