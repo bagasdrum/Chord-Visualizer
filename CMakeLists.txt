@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.25)
+project(ChordScope VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+include(FetchContent)
+
+set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "" FORCE)
+set(SMTG_CREATE_BUNDLE_FOR_WINDOWS ON CACHE BOOL "" FORCE)
+set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    vst3sdk
+    GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
+    GIT_TAG master
+    GIT_SHALLOW TRUE
+    GIT_SUBMODULES_RECURSE TRUE
+)
+FetchContent_MakeAvailable(vst3sdk)
+smtg_enable_vst3_sdk()
+
+add_subdirectory(src/vst3_native)
