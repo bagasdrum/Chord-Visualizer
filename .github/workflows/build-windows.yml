@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
@@ -24,18 +24,3 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build --config Release --parallel
-
-      - name: Package
-        shell: pwsh
-        run: |
-          $vst = Get-ChildItem -Path build -Filter "ChordScope.vst3" -Recurse -Directory | Select-Object -First 1
-          if (-not $vst) { throw "ChordScope.vst3 was not found after build." }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item $vst.FullName -Destination dist/ChordScope.vst3 -Recurse
-          Compress-Archive -Path dist/ChordScope.vst3 -DestinationPath ChordScope-Windows-x64.zip -Force
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ChordScope-Windows-x64
-          path: ChordScope-Windows-x64.zip
