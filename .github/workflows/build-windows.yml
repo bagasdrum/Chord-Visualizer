@@ -23,4 +23,4 @@ jobs:
       - name: Build VST3
         shell: pwsh
         run: |
-          cmake --build build --config Release --parallel
+          cmake --build build --config Release --parallel --verbose
